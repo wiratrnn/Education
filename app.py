@@ -1,8 +1,333 @@
 import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
 
 st.set_page_config(layout='wide')
 
+if "df" not in st.session_state:
+    st.session_state.df = None
+
+np.random.seed(42)
+
+n = 30
+x = np.linspace(-5,5.5,n)
+x2 = np.random.normal(0, 2.5, n)
+x3 = np.random.randint(1, 8, n)
+t = np.linspace(0,2*np.pi,128)
+
+@st.dialog("Penjelasan Mengenai Data Melingkar")
+def penjelas_circle():
+    st.markdown("""
+    Koefisien yang diestimasi pada metode **Least Square Circle Fitting** bukanlah
+    pusat dan jari-jari lingkaran secara langsung.
+
+    Persamaan lingkaran terlebih dahulu diubah menjadi bentuk linier sehingga parameter
+    yang diestimasi adalah **D**, **E**, dan **F**.
+    """)
+
+    st.latex(r"(x-h)^2+(y-k)^2=r^2")
+
+    st.markdown("Dikembangkan menjadi")
+
+    st.latex(r"x^2+y^2-2hx-2ky+h^2+k^2-r^2=0")
+
+    st.markdown("Kemudian ditulis sebagai")
+
+    st.latex(r"x^2+y^2+Dx+Ey+F=0")
+
+    st.markdown("Sehingga hubungan parameter adalah")
+
+    st.latex(r"D=-2h \qquad atau \qquad \beta_0")
+    st.latex(r"E=-2k \qquad atau \qquad \beta_1")
+    st.latex(r"F=h^2+k^2-r^2 \qquad atau \qquad \beta_2")
+
+    st.divider()
+
+    st.markdown("Untuk dataset simulasi ini:")
+
+    st.latex(r"x^2+y^2=25")
+
+    st.markdown("atau")
+
+    st.latex(r"x^2+y^2-25=0")
+
+    st.markdown("Sehingga koefisien sebenarnya adalah")
+
+    st.latex(r"D=0,\qquad E=0,\qquad F=-25")
+
+    st.info(
+        "Nilai hasil estimasi tidak akan sama persis karena setiap titik "
+        "ditambahkan noise Gaussian."
+    )
+
+def f_num(x):
+    return f"{float(x):.4g}"
+
+def _matrix_visual_story(data):
+    if data == "Linear":
+        A = r"\begin{bmatrix}1&x_1\\1&x_2\\\vdots&\vdots\\1&x_n\end{bmatrix}"
+        beta = r"\begin{bmatrix}\beta_0\\\beta_1\end{bmatrix}"
+        b = r"\begin{bmatrix}y_1\\y_2\\\vdots\\y_n\end{bmatrix}"
+        product = rf"\underbrace{{{A}}}_{{A}}\;\underbrace{{{beta}}}_{{\hat{{\beta}}}}=\underbrace{{{b}}}_{{b}}"
+
+        return [
+            {"title": "1. Model awal", "kind": "single", "latex": r"y_i=\beta_0+\beta_1x_i+e_i"},
+            {"title": "2. Bentuk matriks", "kind": "single", "latex": r"\mathbf{b}=A\hat{\beta}+e"},
+            {
+                "title": "3. Susunan matriks",
+                "kind": "triplet",
+                "A": rf"A={A}",
+                "beta": rf"\hat{{\beta}}={beta}",
+                "b": rf"b={b}",
+                "prod": product,
+            },
+            {"title": "4. Fungsi error", "kind": "single", "latex": r"E(\beta)=(b-A\beta)^T(b-A\beta)"},
+            {"title": "5. Persamaan normal", "kind": "single", "latex": r"\hat{\beta}=(A^TA)^{-1}A^Tb"},
+        ]
+
+    if data == "Multi Variabel":
+        A = r"\begin{bmatrix}1&x_{11}&x_{12}&x_{13}\\1&x_{21}&x_{22}&x_{23}\\\vdots&\vdots&\vdots&\vdots\\1&x_{n1}&x_{n2}&x_{n3}\end{bmatrix}"
+        beta = r"\begin{bmatrix}\beta_0\\\beta_1\\\beta_2\\\beta_3\end{bmatrix}"
+        b = r"\begin{bmatrix}y_1\\y_2\\\vdots\\y_n\end{bmatrix}"
+        product = rf"\underbrace{{{A}}}_{{A}}\;\underbrace{{{beta}}}_{{\hat{{\beta}}}}=\underbrace{{{b}}}_{{b}}"
+
+        return [
+            {"title": "1. Model awal", "kind": "single", "latex": r"y_i=\beta_0+\beta_1x_{i1}+\beta_2x_{i2}+\beta_3x_{i3}+e_i"},
+            {"title": "2. Bentuk matriks", "kind": "single", "latex": r"\mathbf{b}=A\hat{\beta}+e"},
+            {
+                "title": "3. Susunan matriks",
+                "kind": "triplet",
+                "A": rf"A={A}",
+                "beta": rf"\hat{{\beta}}={beta}",
+                "b": rf"b={b}",
+                "prod": product,
+            },
+            {"title": "4. Fungsi error", "kind": "single", "latex": r"E(\beta)=(b-A\beta)^T(b-A\beta)"},
+            {"title": "5. Persamaan normal", "kind": "single", "latex": r"\hat{\beta}=(A^TA)^{-1}A^Tb"},
+        ]
+
+    if data == "Polinomial (kuadrat)":
+        A = r"""
+        \begin{bmatrix}
+        1 & x_i & x_i^2\\
+        1 & x_i & x_i^2\\
+        \vdots & \vdots & \vdots\\
+        1 & x_i & x_i^2
+        \end{bmatrix}
+        """
+        beta = r"\begin{bmatrix}\beta_0\\\beta_1\\\beta_2\end{bmatrix}"
+        b = r"\begin{bmatrix}y_1\\y_2\\\vdots\\y_n\end{bmatrix}"
+        product = rf"\underbrace{{{A}}}_{{A}}\;\underbrace{{{beta}}}_{{\hat{{\beta}}}}=\underbrace{{{b}}}_{{b}}"
+
+        return [
+            {"title": "1. Model awal", "kind": "single", "latex": r"y_i=\beta_0+\beta_1x_i+\beta_2x_i^2+e_i"},
+            {"title": "2. Bentuk matriks", "kind": "single", "latex": r"\mathbf{b}=A\hat{\beta}+e"},
+            {
+                "title": "3. Susunan matriks",
+                "kind": "triplet",
+                "A": rf"A={A}",
+                "beta": rf"\hat{{\beta}}={beta}",
+                "b": rf"b={b}",
+                "prod": product,
+            },
+            {"title": "4. Fungsi error", "kind": "single", "latex": r"E(\beta)=(b-A\beta)^T(b-A\beta)"},
+            {"title": "5. Persamaan normal", "kind": "single", "latex": r"\hat{\beta}=(A^TA)^{-1}A^Tb"},
+        ]
+
+    if data == "Polinomial (kubik)":
+        A = r"""
+        \begin{bmatrix}
+        1 & x_i & x_i^2 & x_i^3\\
+        1 & x_i & x_i^2 & x_i^3\\
+        \vdots & \vdots & \vdots & \vdots\\
+        1 & x_i & x_i^2 & x_i^3
+        \end{bmatrix}
+        """
+        beta = r"\begin{bmatrix}\beta_0\\\beta_1\\\beta_2\\\beta_3\end{bmatrix}"
+        b = r"\begin{bmatrix}y_1\\y_2\\\vdots\\y_n\end{bmatrix}"
+        product = rf"\underbrace{{{A}}}_{{A}}\;\underbrace{{{beta}}}_{{\hat{{\beta}}}}=\underbrace{{{b}}}_{{b}}"
+
+        return [
+            {"title": "1. Model awal", "kind": "single", "latex": r"y_i=\beta_0+\beta_1x_i+\beta_2x_i^2+\beta_3x_i^3+e_i"},
+            {"title": "2. Bentuk matriks", "kind": "single", "latex": r"\mathbf{b}=A\hat{\beta}+e"},
+            {
+                "title": "3. Susunan matriks",
+                "kind": "triplet",
+                "A": rf"A={A}",
+                "beta": rf"\hat{{\beta}}={beta}",
+                "b": rf"b={b}",
+                "prod": product,
+            },
+            {"title": "4. Fungsi error", "kind": "single", "latex": r"E(\beta)=(b-A\beta)^T(b-A\beta)"},
+            {"title": "5. Persamaan normal", "kind": "single", "latex": r"\hat{\beta}=(A^TA)^{-1}A^Tb"},
+        ]
+
+    if data == "Circle":
+        A = r"\begin{bmatrix}x_1&y_1&1\\x_2&y_2&1\\\vdots&\vdots&\vdots\\x_n&y_n&1\end{bmatrix}"
+        beta = r"\begin{bmatrix}D\\E\\F\end{bmatrix}"
+        b = r"\begin{bmatrix}-(x_1^2+y_1^2)\\-(x_2^2+y_2^2)\\\vdots\\-(x_n^2+y_n^2)\end{bmatrix}"
+        product = rf"\underbrace{{{A}}}_{{A}}\;\underbrace{{{beta}}}_{{\hat{{\beta}}}}=\underbrace{{{b}}}_{{b}}"
+
+        return [
+            {"title": "1. Model awal", "kind": "single", "latex": r"x_i^2+y_i^2+Dx_i+Ey_i+F=0"},
+            {"title": "2. Bentuk linear", "kind": "single", "latex": r"Dx_i+Ey_i+F=-(x_i^2+y_i^2)"},
+            {
+                "title": "3. Susunan matriks",
+                "kind": "triplet",
+                "A": rf"A={A}",
+                "beta": rf"\hat{{\beta}}={beta}",
+                "b": rf"b={b}",
+                "prod": product,
+            },
+            {"title": "4. Fungsi error", "kind": "single", "latex": r"E(\beta)=(b-A\beta)^T(b-A\beta)"},
+            {"title": "5. Persamaan normal", "kind": "single", "latex": r"\hat{\beta}=(A^TA)^{-1}A^Tb"},
+        ]
+
+    A = r"\begin{bmatrix}1&x_1\\1&x_2\\\vdots&\vdots\\1&x_n\end{bmatrix}"
+    beta = r"\begin{bmatrix}\beta_0\\\beta_1\end{bmatrix}"
+    b = r"\begin{bmatrix}y_1\\y_2\\\vdots\\y_n\end{bmatrix}"
+    product = rf"\underbrace{{{A}}}_{{A}}\;\underbrace{{{beta}}}_{{\hat{{\beta}}}}=\underbrace{{{b}}}_{{b}}"
+
+    return [
+        {"title": "1. Model awal", "kind": "single", "latex": r"y_i=\beta_0+\beta_1x_i+e_i"},
+        {"title": "2. Bentuk matriks", "kind": "single", "latex": r"\mathbf{b}=A\hat{\beta}+e"},
+        {
+            "title": "3. Susunan matriks",
+            "kind": "triplet",
+            "A": rf"A={A}",
+            "beta": rf"\hat{{\beta}}={beta}",
+            "b": rf"b={b}",
+            "prod": product,
+        },
+        {"title": "4. Fungsi error", "kind": "single", "latex": r"E(\beta)=(b-A\beta)^T(b-A\beta)"},
+        {"title": "5. Persamaan normal", "kind": "single", "latex": r"\hat{\beta}=(A^TA)^{-1}A^Tb"},
+    ]
+
+def least_square(A, b):
+    A = np.asarray(A, float)
+    b = np.asarray(b, float).reshape(-1, 1)
+
+    beta = np.linalg.lstsq(A, b, rcond=None)[0]
+    fitting = A @ beta
+    residual = b - fitting
+
+    sse = np.sum(residual**2)
+    mse = np.mean(residual**2)
+    rmse = np.sqrt(mse)
+    r2 = 1 - sse / np.sum((b - b.mean())**2)
+
+    return {
+        "beta": beta.ravel(),
+        "fitting": fitting.ravel(),
+        "residual": residual.ravel(),
+        "SSE": float(sse),
+        "MSE": float(mse),
+        "RMSE": float(rmse),
+        "R2": float(r2)
+    }
+
+def _build_latex(beta, data):
+    beta = np.asarray(beta, dtype=float)
+
+    if data == "Circle":
+        latex = r"x^2 + y^2"
+        for coef, var in zip(beta, ["x", "y", ""]):
+            tanda = "+" if coef >= 0 else "-"
+            if var:
+                latex += rf" {tanda} {f_num(abs(coef))}{var}"
+            else:
+                latex += rf" {tanda} {f_num(abs(coef))}"
+        return latex + r" = 0"
+
+    if data == "Linear":
+        tanda = "+" if beta[1] >= 0 else "-"
+        return rf"\hat{{y}} = {f_num(beta[0])} {tanda} {f_num(abs(beta[1]))}x"
+
+    is_poly = data in ["Polinomial (kuadrat)", "Polinomial (kubik)"]
+    latex = rf"\hat{{y}} = {f_num(beta[0])}"
+
+    for i, coef in enumerate(beta[1:], start=1):
+        tanda = "+" if coef >= 0 else "-"
+        if is_poly:
+            variabel = "x" if i == 1 else rf"x^{{{i}}}"
+        else:
+            variabel = rf"x_{{{i}}}"
+
+        latex += rf" {tanda} {f_num(abs(coef))}{variabel}"
+
+    return latex
+
+Dataset = {
+    "Linear": {
+        "data": pd.DataFrame({
+            "x": x,
+            "y": 2.3*x - 1 + np.random.normal(0, 1, n)
+        }),
+        "latex": (
+            r"y=-1+2.3x+\varepsilon",
+            r"\qquad \varepsilon\sim\mathcal{N}(0,1)"
+        ),
+        "beta": [-1, 2.3]
+    },
+
+    "Multi Variabel": {
+        "data": pd.DataFrame({
+            "x1": x,
+            "x2": x2,
+            "x3": x3,
+            "y": 2.5*x - 1.8*x2 + 3.2*x3 + 1.2 + np.random.normal(0, 1, n)
+        }),
+        "latex": (
+            r"y=1.2+2.5x_1-1.8x_2+3.2x_3+\varepsilon",
+            r"\qquad \varepsilon\sim\mathcal{N}(0,1)"
+        ),
+        "beta": [1.2, 2.5, -1.8, 3.2]
+    },
+
+    "Polinomial (kuadrat)": {
+        "data": pd.DataFrame({
+            "x": x,
+            "x^2": x**2,
+            "y": -0.2*x**2 - 0.25*x + 5 + np.random.normal(0, 0.5, n)
+        }),
+        "latex": (
+            r"y=5-0.25x-0.2x^2+\varepsilon",
+            r"\qquad \varepsilon\sim\mathcal{N}(0,0.5)"
+        ),
+        "beta": [5, -0.25, -0.2]
+    },
+
+    "Polinomial (kubik)": {
+        "data": pd.DataFrame({
+            "x": x,
+            "x^2": x**2,
+            "x^3": x**3,
+            "y": 0.25*x**3 + 0.25*x**2 - 5*x + np.random.normal(0, 2.5, n)
+        }),
+        "latex": (
+            r"y=-5x+0.25x^2+0.25x^3+\varepsilon",
+            r"\qquad \varepsilon\sim\mathcal{N}(0,2.5)"
+        ),
+        "beta": [0, -5, 0.25, 0.25]
+    },
+
+    "Circle": {
+        "data": pd.DataFrame({
+            "x": 5*np.cos(t) + np.random.normal(0, 0.5, len(t)),
+            "y": 5*np.sin(t) + np.random.normal(0, 0.5, len(t))
+        }),
+        "latex": (
+            r"x^2+y^2=25",
+            r"\qquad \varepsilon_x,\varepsilon_y\sim\mathcal{N}(0,0.5)"
+        ),
+        "beta": [0, 0, -25]
+    }
+}
+
 st.title("Metode Least Square")
+st.caption("Made with ❤️ by **Wira Triono**")
 st.markdown("""
         Disaat anda ingin melakukan regresi, baik sederhana maupun berganda menggunakan metode *least square*, 
         pasti anda sering melihat rumus-rumus seperti ini:
@@ -32,7 +357,8 @@ st.markdown("""
     Lalu bagaimana proses penyederhanaan tersebut terjadi? Mengapa dari sebuah persamaan matriks yang terlihat cukup rumit dapat muncul rumus yang jauh lebih sederhana?
     """, unsafe_allow_html=True, text_alignment='justify')
 
-tab1, tab2, tab3, tab4 = st.tabs(['Penurunan Rumus', 'Penyederhanaan Rumus', '📚 Referensi', 'Simulasi'])
+tab1, tab2, tab3, tab4 = st.tabs(['📐 Penurunan Rumus', '✨ Penyederhanaan Rumus', '📚 Referensi', '🚀 Simulasi'])
+
 with tab1:
     st.markdown(r"""
             Jika diberikan sebuah data sebanyak $n$ dengan $m$ variabel independen dan 1 variabel dependen,
@@ -356,23 +682,23 @@ with tab2:
     st.divider()
     st.markdown(r"**Langkah kedua** adalah menghitung matriks $X^T Y$")
     st.latex(r'''
-    X^TY=
-    \begin{bmatrix}
-    1 & 1 & \cdots & 1\\
-    x_1 & x_2 & \cdots & x_n
-    \end{bmatrix}
-    \begin{bmatrix}
-    y_1\\
-    y_2\\
-    \vdots\\
-    y_n
-    \end{bmatrix}
-    =
-    \begin{bmatrix}
-    \sum Y\\
-    \sum XY
-    \end{bmatrix}
-    ''')
+        X^TY=
+        \begin{bmatrix}
+        1 & 1 & \cdots & 1\\
+        x_1 & x_2 & \cdots & x_n
+        \end{bmatrix}
+        \begin{bmatrix}
+        y_1\\
+        y_2\\
+        \vdots\\
+        y_n
+        \end{bmatrix}
+        =
+        \begin{bmatrix}
+        \sum Y\\
+        \sum XY
+        \end{bmatrix}
+        ''')
 
     st.divider()
     st.markdown(r"**Langkah terakhir** Substitusi ke dalam persamaan $\beta=(X^TX)^{-1}X^TY$")
@@ -419,14 +745,15 @@ with tab2:
         ''')
 
     st.markdown("Dengan demikian maka diperoleh:")
-    st.latex(r'''
+    col1, col2, = st.columns(2, gap='xxsmall')
+    col1.latex(r'''
         \hat{\beta}_0
         =
         \frac{\sum X^2\sum Y-\sum X\sum XY}
         {n\sum X^2-(\sum X)^2}
         ''')
 
-    st.latex(r'''
+    col2.latex(r'''
         \hat{\beta}_1
         =
         \frac{n\sum XY-\sum X\sum Y}
@@ -512,4 +839,356 @@ with tab3:
     """)
 
 with tab4:
-    st.info("Masih dalam tahap pengembangan")
+    colSetting, colVisual = st.columns([0.25,0.75], gap='xsmall', border=True)
+
+    with colSetting:
+        st.header("Dataset")
+        sumber_data = st.radio(" ",["Data Sampel", "Data Custom"], horizontal=True, label_visibility="collapsed")
+
+        if sumber_data == "Data Custom":
+            with st.form("generate_form", border=False):
+                col1, col2, col3 = st.columns(3)
+                n = col1.number_input("Sampel", min_value=10)
+                p = col2.number_input("Variabel", min_value=1, max_value=10, value=3)
+                outlier = col3.number_input("Outlier", min_value=0, max_value=10)
+                noise = st.slider("Noise (%)", min_value=0.0, max_value=1.0, step=0.01, value=0.5)
+
+                tabX, tabY = st.tabs(['Generate X', 'Generate Y'])
+                with tabX:
+                    tab_x = pd.DataFrame({
+                        " ": [f"x{i+1}" for i in range(p)],
+                        "Distribusi": ["Linear Space"] * p,
+                        "a": [-5] * p,
+                        "b": [5] * p
+                    })
+                    st.caption("a dan b adalah parameter untuk distribusi,   a sebagai min/mean(μ) dan b sebagai max/standar deviasi(σ)")
+                    tab_x = st.data_editor(tab_x, hide_index=True, key="tab_x",
+                                column_config={
+                                    "Distribusi": st.column_config.SelectboxColumn(
+                                        "Distribusi", options=["Linear Space", "Uniform", "Normal", "Integer"]
+                                    )
+                                }
+                            )
+
+                with tabY:
+                    equation = pd.DataFrame({
+                        "Aktif": [True] * p,
+                        "Koefisien": [1.0] * p,
+                        "Pangkat": [1] * p,
+                        "Fungsi": ["None"] * p,
+                    }, index=[f"x{i+1}" for i in range(p)])
+
+                    equation = st.data_editor(equation, hide_index=False, key='equation',
+                                column_config={
+                                    "Fungsi": st.column_config.SelectboxColumn(
+                                        options=["None", "sin", "cos", "tan", "exp", "log", "sqrt"]
+                                    )
+                                }
+                            )
+
+                    fungsi = {
+                        "None": "{}",
+                        "sin": r"\sin({})",
+                        "cos": r"\cos({})",
+                        "tan": r"\tan({})",
+                        "exp": r"e^{{{}}}",
+                        "log": r"\log({})",
+                        "sqrt": r"\sqrt{{{}}}",
+                    }
+
+                    if not equation["Aktif"].any():
+                        st.warning("Minimal satu variabel harus aktif.")
+                        st.stop()
+
+                    mask = equation["Aktif"]
+                    latex_list = []
+
+                    for var_name, r in equation.loc[mask].iterrows():
+                        var = f"x_{{{var_name[1:]}}}"
+                        if r["Pangkat"] > 1:
+                            var += f"^{{{int(r['Pangkat'])}}}"
+
+                        term = fungsi[r["Fungsi"]].format(var)
+
+                        if r["Koefisien"] != 1:
+                            term = f"{f_num(r['Koefisien'])}{term}"
+
+                        latex_list.append(f"{term} + ")
+
+                    latex = " ".join(latex_list)
+                    const = st.number_input("kostanta", value=1, help="jika tidak ingin menggunakan konstanta, maka ubah menjadi 0")
+
+                    st.latex(rf"y={latex} {const:g} + \epsilon")
+
+                generate = st.form_submit_button("Generate Data", type="primary", width='stretch')
+
+            if generate:
+                st.warning("Ini masih tahap percobaan")
+            
+            st.stop()
+        else:
+            data = st.selectbox("Pilih Data", Dataset.keys())
+            st.session_state.df = Dataset[data]['data']
+            st.latex(Dataset[data]["latex"][0], help="Data tersebut dibentuk berdasarkan persamaan ini")
+            st.latex(Dataset[data]["latex"][1], help="Sejatinya 'RMSE' adalah standar deviasi (σ) dari data asli, karena variansi error (σ²) adalah √MSE atau RMSE, perhatikan dan bandingkan angkanya (R² dan MSE tidak berlaku untuk data circle)")
+
+            st.session_state.df = st.data_editor(
+                st.session_state.df,
+                height=422
+            )
+
+    with colVisual:
+        @st.fragment
+        def least_square_simulation():
+            st.title("Least Square Simulation")
+
+            df_source = st.session_state.get("df")
+            if df_source is None or df_source.empty:
+                return
+
+            df = df_source.copy()
+
+            obj_cols = df.select_dtypes(include="object").columns
+            for col in obj_cols:
+                df[col] = df[col].astype("category").cat.codes
+
+            poly_degree = {
+                "Polinomial (kuadrat)": 2,
+                "Polinomial (kubik)": 3,
+            }
+            is_circle = data == "Circle"
+            is_poly = data in poly_degree
+            is_simple = data in {"Linear", "Circle"} or is_poly
+
+            colA, colB = st.columns([0.7, 0.3])
+
+            with colA:
+                if is_simple:
+                    x = "x" if "x" in df.columns else df.columns[0]
+                    y = "y" if "y" in df.columns else [c for c in df.columns if c != x][0]
+                    st.caption(f"Sumbu yang dipakai: **{x}** sebagai X dan **{y}** sebagai Y.")
+                else:
+                    col1, col2 = st.columns(2)
+
+                    x = col1.selectbox("Variabel X", df.columns)
+                    opsi_y = [c for c in df.columns if c != x]
+                    if not opsi_y:
+                        return
+
+                    default_y = "y" if "y" in opsi_y else opsi_y[0]
+                    y = col2.selectbox("Variabel Y", opsi_y, index=opsi_y.index(default_y))
+
+            x_arr = df[x].to_numpy(dtype=float, copy=False)
+            y_arr = df[y].to_numpy(dtype=float, copy=False)
+            n = len(df)
+
+            if is_circle:
+                A = np.c_[x_arr, y_arr, np.ones(n)]
+                b = -(x_arr**2 + y_arr**2)
+
+            elif data == "Linear":
+                A = np.c_[np.ones(n), x_arr]
+                b = y_arr
+
+            elif is_poly:
+                degree = poly_degree[data]
+                A = np.column_stack([np.ones(n)] + [x_arr**p for p in range(1, degree + 1)])
+                b = y_arr
+
+            else:
+                X = df.drop(columns=[y])
+                A = np.c_[np.ones(n), X.to_numpy(dtype=float, copy=False)]
+                b = y_arr
+
+            hasil = least_square(A, b)
+            beta = np.asarray(hasil["beta"], dtype=float)
+
+            with colB:
+                st.space("medium")
+                st.header("Metric", text_alignment="center")
+
+                colC, colD = st.columns(2)
+                colC.metric("SSE", f"{hasil['SSE']:.2f}", border=True)
+                colC.metric("MSE", f"{hasil['MSE']:.2f}", border=True)
+                colD.metric("RMSE", f"{hasil['RMSE']:.2f}", border=True)
+                colD.metric("R²", f"{hasil['R2']:.2f}", border=True)
+
+                df_beta = pd.DataFrame(
+                    {"Parameter": [f"β{i}" for i in range(len(beta))],
+                     "Estimasi": beta,
+                     "Asli": Dataset[data]["beta"]}
+                )
+
+                st.dataframe(df_beta, hide_index=True, width="stretch")
+                if data == "Circle":
+                    st.button("INFO", on_click=penjelas_circle)
+                                
+
+            latex = _build_latex(beta, data)
+
+            df_plot = df.copy()
+            df_plot["Residual"] = np.asarray(hasil["residual"], dtype=float)
+
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot[x],
+                    y=df_plot[y],
+                    mode="markers",
+                    marker=dict(size=10, color="#2563eb", line=dict(color="white", width=1)),
+                    showlegend=False,
+                )
+            )
+
+            if is_circle:
+                D, E, F = beta
+                xc, yc = -D / 2, -E / 2
+                radicand = xc**2 + yc**2 - F
+                r = np.sqrt(max(radicand, 0.0))
+
+                t_curve = np.linspace(0, 2 * np.pi, 360)
+                x_fit = xc + r * np.cos(t_curve)
+                y_fit = yc + r * np.sin(t_curve)
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_fit,
+                        y=y_fit,
+                        mode="lines",
+                        name="Fitting Circle",
+                        line=dict(color="red", width=3),
+                        showlegend=False,
+                    )
+                )
+                fig.update_yaxes(scaleanchor="x", scaleratio=1)
+
+            else:
+                x_curve = np.linspace(df[x].min(), df[x].max(), 500)
+
+                if data == "Linear":
+                    y_curve = beta[0] + beta[1] * x_curve
+
+                elif is_poly:
+                    degree = poly_degree[data]
+                    y_curve = np.full_like(x_curve, beta[0], dtype=float)
+                    for p in range(1, degree + 1):
+                        y_curve += beta[p] * x_curve**p
+
+                else:
+                    X = df.drop(columns=[y])
+                    curve_df = pd.DataFrame(
+                        {
+                            col: np.full_like(x_curve, float(X[col].mean()), dtype=float)
+                            for col in X.columns
+                        }
+                    )
+                    curve_df[x] = x_curve
+
+                    y_curve = np.full_like(x_curve, beta[0], dtype=float)
+                    for i, col in enumerate(X.columns, start=1):
+                        y_curve += beta[i] * curve_df[col].to_numpy(dtype=float, copy=False)
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_curve,
+                        y=y_curve,
+                        mode="lines",
+                        name="Fitting",
+                        line=dict(color="red", width=3),
+                        showlegend=False,
+                    )
+                )
+
+            fig.update_layout(
+                height=500,
+                template="simple_white",
+                xaxis=dict(title=x, showgrid=True, constrain="domain", ticks="outside"),
+                yaxis=dict(title=y, showgrid=True, ticks="outside"),
+            )
+
+            x_res = df_plot[x].to_numpy(dtype=float, copy=False)
+            r_res = df_plot["Residual"].to_numpy(dtype=float, copy=False)
+
+            fig_res = go.Figure()
+            fig_res.add_trace(
+                go.Scatter(
+                    x=x_res,
+                    y=r_res,
+                    mode="markers",
+                    marker=dict(size=10, color="#2563eb", line=dict(color="white", width=1)),
+                    showlegend=False,
+                )
+            )
+
+            fig_res.add_trace(
+                go.Scatter(
+                    x=np.repeat(x_res, 3),
+                    y=np.column_stack(
+                        [
+                            np.zeros_like(r_res),
+                            r_res,
+                            np.full_like(r_res, np.nan, dtype=float),
+                        ]
+                    ).ravel(),
+                    mode="lines",
+                    line=dict(color="gray", dash="dot", width=2),
+                    showlegend=False,
+                )
+            )
+            fig_res.add_hline(y=0, line_color="red", line_width=2)
+            fig_res.update_layout(
+                height=500,
+                template="simple_white",
+                xaxis=dict(title=x, showgrid=True, ticks="outside"),
+                yaxis=dict(title="Residual", showgrid=True, ticks="outside", rangemode="tozero"),
+            )
+
+            fig_hist = px.histogram(
+                df_plot,
+                x="Residual",
+                nbins=15,
+                opacity=0.8,
+                template="simple_white",
+            )
+            fig_hist.update_layout(height=500, template="simple_white")
+
+            with colA:
+                st.latex(latex)
+                tab1, tab2, tab3, tab4 = st.tabs(["Regresi", "Residual", "Distribusi Residual", "Visual Matrix"])
+
+                with tab1:
+                    st.plotly_chart(fig, width="stretch")
+
+                with tab2:
+                    st.plotly_chart(fig_res, width="stretch")
+
+                with tab3:
+                    st.plotly_chart(fig_hist, width="stretch")
+
+                with tab4:
+                    st.subheader("Visual Matrix")
+
+                    steps = _matrix_visual_story(data)
+
+                    for i, step in enumerate(steps):
+                        with st.container(border=True):
+                            st.markdown(f"**{step['title']}**")
+
+                            if step["kind"] == "single":
+                                st.latex(step["latex"])
+
+                            elif step["kind"] == "triplet":
+                                colA, colB, colC = st.columns([4, 2, 3], gap="xxsmall")
+                                colA.latex(step["A"])
+                                colB.latex(step["beta"])
+                                colC.latex(step["b"])
+                            
+                                st.latex(step["prod"])
+
+                        if i < len(steps) - 1:
+                            st.markdown(
+                                "<div style='text-align:center;font-size:26px;line-height:1;'>↓</div>",
+                                unsafe_allow_html=True
+                            )
+
+        least_square_simulation()
